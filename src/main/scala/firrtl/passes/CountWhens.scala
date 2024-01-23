@@ -12,11 +12,18 @@ import firrtl.transforms._
 import scala.collection.mutable
 
 
-case class ConditionalEdgeAnnotation(parentCondition: Target, childCondition: Target)
+case class PositiveEdgeAnnotation(parentCondition: Target, childCondition: Target)
     extends MultiTargetAnnotation {
 
   override val targets: Seq[Seq[Target]] = Seq(Seq(parentCondition), Seq(childCondition))
-  override def duplicate(n: Seq[Seq[Target]]): ConditionalEdgeAnnotation = this.copy(n(0).head, n(1).head)
+  override def duplicate(n: Seq[Seq[Target]]): PositiveEdgeAnnotation = this.copy(n(0).head, n(1).head)
+}
+
+case class NegativeEdgeAnnotation(parentCondition: Target, childCondition: Target)
+    extends MultiTargetAnnotation {
+
+  override val targets: Seq[Seq[Target]] = Seq(Seq(parentCondition), Seq(childCondition))
+  override def duplicate(n: Seq[Seq[Target]]): NegativeEdgeAnnotation = this.copy(n(0).head, n(1).head)
 }
 
 
@@ -39,14 +46,14 @@ object CountWhens extends Transform with DependencyAPIMigration {
     (m, newAnnos)
   }
 
-  def onStmt(s: Statement, main: String, m: String, parent: Option[ir.Expression], annos: mutable.ListBuffer[Annotation]): Statement = s match {
+  def onStmt(s: Statement, main: String, m: String, parent: Option[(ir.Expression, Boolean)], annos: mutable.ListBuffer[Annotation]): Statement = s match {
     case c: Conditionally =>
       println(s"Conditionally: ${c.pred}")
       parent match {
-        case Some(p) => 
+        case Some((p, b)) => 
           val parentTarget = Utils.toTarget(main, m)(p)
           val childTarget = Utils.toTarget(main, m)(c.pred)
-          val edgeAnno = ConditionalEdgeAnnotation(parentTarget, childTarget)
+          val edgeAnno = if (b) PositiveEdgeAnnotation(parentTarget, childTarget) else NegativeEdgeAnnotation(parentTarget, childTarget)
           val dontTouchParent = DontTouchAnnotation(parentTarget)
           val dontTouchChild = DontTouchAnnotation(childTarget)
           annos.append(edgeAnno)
@@ -55,8 +62,8 @@ object CountWhens extends Transform with DependencyAPIMigration {
         case None =>
       }
       println(s"edge: ${parent} --> ${c.pred}")
-      onStmt(c.conseq, main, m, Some(c.pred), annos)
-      onStmt(c.alt, main, m, Some(c.pred), annos)
+      onStmt(c.conseq, main, m, Some(c.pred, true), annos)
+      onStmt(c.alt, main, m, Some(c.pred, false), annos)
       c
     case x => x.map(onStmt(_, main, m, parent, annos))
   }
