@@ -10,6 +10,7 @@ import firrtl.options.Dependency
 import firrtl.passes.MemPortUtils.memPortField
 import firrtl.passes.PassException
 import firrtl.passes.memlib.VerilogMemDelays
+import firrtl.passes.{PositiveEdgeAnnotation, NegativeEdgeAnnotation}
 import firrtl.stage.Forms
 import firrtl.stage.TransformManager.TransformDependency
 import firrtl.transforms.{EnsureNamedStatements, PropagatePresetAnnotations}
@@ -34,9 +35,17 @@ object FirrtlToTransitionSystem extends Transform with DependencyAPIMigration {
   override def optionalPrerequisites: Seq[TransformDependency] = Seq(Dependency[firrtl.passes.InlineInstances])
 
   override protected def execute(state: CircuitState): CircuitState = {
+    println("-------enter execute---------")
     val circuit = state.circuit
     val presetRegs = state.annotations.collect {
       case PresetRegAnnotation(target) if target.module == circuit.main => target.ref
+    }.toSet
+
+    val decisionVars = state.annotations.collect {
+      case a: PositiveEdgeAnnotation  => {
+        println(s"[PositiveEdge]: ${a.targets}")
+        a.targets
+      }
     }.toSet
 
     // collect all non-random memory initialization
