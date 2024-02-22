@@ -17,6 +17,7 @@ import firrtl.transforms.{EnsureNamedStatements, PropagatePresetAnnotations}
 import logger.LazyLogging
 
 import scala.collection.mutable
+import scala.util.matching.Regex
 
 case class TransitionSystemAnnotation(sys: TransitionSystem) extends NoTargetAnnotation
 
@@ -41,12 +42,26 @@ object FirrtlToTransitionSystem extends Transform with DependencyAPIMigration {
       case PresetRegAnnotation(target) if target.module == circuit.main => target.ref
     }.toSet
 
-    val decisionVars = state.annotations.collect {
-      case a: PositiveEdgeAnnotation  => {
-        println(s"[PositiveEdge]: ${a.targets}")
-        a.targets
-      }
-    }.toSet
+    // get suffix map form annotation
+    // FIXME: a child may have multiple parents
+    val decisionVarsMap = state.annotations.collect {
+      case PositiveEdgeAnnotation(parentCondition, childCondition, pIndex, cIndex) => 
+        val pattern = """.*?>(.*)""".r
+        val matchres = pattern.findFirstMatchIn(childCondition.serialize).map(_.group(1))
+        val childName = matchres.get
+        val suffix = s"${childName}_g#${cIndex}:${pIndex}"
+        println(s"${suffix}")
+        println(s"[PositiveEdge]: ${childCondition.serialize}")
+        childName -> suffix
+      case NegativeEdgeAnnotation(parentCondition, childCondition, pIndex, cIndex) => 
+        val pattern = """.*?>(.*)""".r
+        val matchres = pattern.findFirstMatchIn(childCondition.serialize).map(_.group(1))
+        val childName = matchres.get
+        val suffix = s"${childName}_g#${cIndex}:${pIndex}"
+        println(s"${suffix}")
+        println(s"[NegativeEdge]: ${childCondition.serialize}")
+        childName -> suffix
+    }.toMap
 
     // collect all non-random memory initialization
     val memInit = state.annotations.collect { case a: MemoryInitAnnotation if !a.isRandomInit => a }
@@ -76,8 +91,67 @@ object FirrtlToTransitionSystem extends Transform with DependencyAPIMigration {
     }
 
     val sortedSys = TopologicalSort.run(sys)
-    val anno = TransitionSystemAnnotation(sortedSys)
+
+    // update state and signal names
+    val updatedSignals = sortedSys.signals.map {
+    case signal @ Signal(name, expr, kind) =>
+      println(s"[Signal]: ${name} ${expr} ${kind}")
+      val updatedName = decisionVarsMap.getOrElse(name, name)
+      val updatedExpr = suffixEncoder.updateSignalExpr(expr, decisionVarsMap)
+      println(s"[Updated Signal]: ${updatedName} ${updatedExpr} ${kind}")
+      Signal(updatedName, updatedExpr, kind)
+    }
+    val updatedSys = sortedSys.copy(signals = updatedSignals)
+
+    val anno = TransitionSystemAnnotation(updatedSys)
     state.copy(circuit = circuit, annotations = state.annotations :+ anno)
+  }
+}
+
+object suffixEncoder{
+  def updateSignalExpr(expr: SMTExpr, decisionVarsMap: Map[String, String]): SMTExpr = {
+    expr match {
+      case bvs: BVSymbol => 
+        val updatedName = decisionVarsMap.getOrElse(bvs.name, bvs.name)
+        BVSymbol(updatedName, bvs.width)
+      case arrs: ArraySymbol => 
+        val updatedName = decisionVarsMap.getOrElse(arrs.name, arrs.name)
+        ArraySymbol(updatedName, arrs.indexWidth, arrs.dataWidth)
+      case bvfc: BVFunctionCall =>
+        // TODO: deal with BVFunctionCall
+        println(s"[BVFunctionCall]: ${bvfc.name} ${bvfc.args} ${bvfc.width}")
+        bvfc
+      case arrfc: ArrayFunctionCall =>
+        println(s"[ArrayFunctionCall]: ${arrfc.name} ${arrfc.args} ${arrfc.indexWidth} ${arrfc.dataWidth}")
+        arrfc
+      case bvUnaryExpr: BVUnaryExpr =>
+        updateBVSignal(bvUnaryExpr, decisionVarsMap)
+      case bvBinaryExpr: BVBinaryExpr =>
+        updateBVSignal(bvBinaryExpr, decisionVarsMap)
+      case ite @ BVIte(cond, tru, fals) =>
+        println(s"[BVIte]: ${ite.cond} ${ite.tru} ${ite.fals}")
+        val updatedCond = updateBVSignal(cond, decisionVarsMap)
+        val updatedTru = updateBVSignal(tru, decisionVarsMap)
+        val updatedFals = updateBVSignal(fals, decisionVarsMap)
+        BVIte(updatedCond, updatedTru, updatedFals)
+      case _ => expr
+    }
+  }
+
+  def updateBVSignal(expr: BVExpr, decisionVarsMap: Map[String, String]): BVExpr = {
+    expr match {
+      case bvs: BVSymbol => 
+        val updatedName = decisionVarsMap.getOrElse(bvs.name, bvs.name)
+        BVSymbol(updatedName, bvs.width)
+      case bvUnaryExpr: BVUnaryExpr =>
+        println(s"[BVUnaryExpr]: ${bvUnaryExpr.e}")
+        bvUnaryExpr.reapply(updateBVSignal(bvUnaryExpr.e, decisionVarsMap))
+      case bvBinaryExpr: BVBinaryExpr =>
+        println(s"[BVBinaryExpr]: ${bvBinaryExpr.a} ${bvBinaryExpr.b}")
+        bvBinaryExpr.reapply(updateBVSignal(bvBinaryExpr.a, decisionVarsMap),
+          updateBVSignal(bvBinaryExpr.b, decisionVarsMap))
+      case _ => expr
+    }
   }
 }
 
@@ -174,6 +248,7 @@ private class ModuleToTransitionSystem(
     case ir.DefNode(info, name, expr) =>
       if (!isClock(expr.tpe) && !isAsyncReset(expr.tpe)) {
         infos.append(name -> info)
+        // println("Signal: " + name + " " + expr.serialize)
         signals.append(Signal(name, onExpression(expr), IsNode))
       }
     case r: ir.DefRegister =>
