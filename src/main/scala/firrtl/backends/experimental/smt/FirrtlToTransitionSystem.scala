@@ -44,24 +44,47 @@ object FirrtlToTransitionSystem extends Transform with DependencyAPIMigration {
 
     // get suffix map form annotation
     // FIXME: a child may have multiple parents
-    val decisionVarsMap = state.annotations.collect {
+    val decisionVarsMap = mutable.Map[String, String]()
+    state.annotations.collect {
       case PositiveEdgeAnnotation(parentCondition, childCondition, pIndex, cIndex) => 
         val pattern = """.*?>(.*)""".r
         val matchres = pattern.findFirstMatchIn(childCondition.serialize).map(_.group(1))
         val childName = matchres.get
-        val suffix = s"${childName}_g#${cIndex}:${pIndex}"
+        val suffix = s"${childName}_g#${cIndex}:${cIndex}"
         println(s"${suffix}")
         println(s"[PositiveEdge]: ${childCondition.serialize}")
         childName -> suffix
+        decisionVarsMap += (childName -> suffix)
       case NegativeEdgeAnnotation(parentCondition, childCondition, pIndex, cIndex) => 
         val pattern = """.*?>(.*)""".r
         val matchres = pattern.findFirstMatchIn(childCondition.serialize).map(_.group(1))
         val childName = matchres.get
-        val suffix = s"${childName}_g#${cIndex}:${pIndex}"
+        val suffix = s"${childName}_g#${cIndex}:-${cIndex}"
         println(s"${suffix}")
         println(s"[NegativeEdge]: ${childCondition.serialize}")
         childName -> suffix
-    }.toMap
+        decisionVarsMap += (childName -> suffix)
+    }
+
+    state.annotations.collect {
+      case PositiveEdgeAnnotation(parentCondition, _, pIndex, _) => 
+        val pattern = """.*?>(.*)""".r
+        val matchres = pattern.findFirstMatchIn(parentCondition.serialize).map(_.group(1))
+        val parentName = matchres.get
+        val suffix = s"${parentName}_g#${pIndex}:${pIndex}"
+        parentName -> suffix
+      case NegativeEdgeAnnotation(parentCondition, _, pIndex, _) => 
+        val pattern = """.*?>(.*)""".r
+        val matchres = pattern.findFirstMatchIn(parentCondition.serialize).map(_.group(1))
+        val parentName = matchres.get
+        val suffix = s"${parentName}_g#${pIndex}:-${pIndex}"
+        parentName -> suffix
+    }.foreach { case (parentName, suffix) =>
+      if (!decisionVarsMap.contains(parentName)) {
+        println(s"[DecisionVarsMap]: ${parentName} ${suffix}")
+        decisionVarsMap += (parentName -> suffix)
+      }
+    }
 
     // collect all non-random memory initialization
     val memInit = state.annotations.collect { case a: MemoryInitAnnotation if !a.isRandomInit => a }
@@ -93,6 +116,24 @@ object FirrtlToTransitionSystem extends Transform with DependencyAPIMigration {
     val sortedSys = TopologicalSort.run(sys)
 
     // update state and signal names
+    val updatedStates = sortedSys.states.map {
+      case state @ State(sym, init, next) =>
+        println(s"[State]: ${sym.name} ${init} ${next}")
+        val newsym = sym.rename(decisionVarsMap.getOrElse(sym.name, sym.name))
+        val newinit = if (!init.isEmpty) init.map(expr => suffixEncoder.updateSignalExpr(expr, decisionVarsMap)) else None
+        val newnext = if (!next.isEmpty) next.map(expr => suffixEncoder.updateSignalExpr(expr, decisionVarsMap)) else None
+        println(s"[Updated State]: ${newsym.name} ${newinit} ${newnext}")
+        State(newsym, newinit, newnext)
+    }
+
+    val updatedInputs = sortedSys.inputs.map {
+      case input @ BVSymbol(name, width) =>
+        val updatedName = decisionVarsMap.getOrElse(name, name)
+        println(s"[Input]: ${name} ${width}")
+        println(s"[Updated Input]: ${updatedName} ${width}")
+        BVSymbol(updatedName, width)
+    }
+
     val updatedSignals = sortedSys.signals.map {
     case signal @ Signal(name, expr, kind) =>
       println(s"[Signal]: ${name} ${expr} ${kind}")
@@ -101,7 +142,7 @@ object FirrtlToTransitionSystem extends Transform with DependencyAPIMigration {
       println(s"[Updated Signal]: ${updatedName} ${updatedExpr} ${kind}")
       Signal(updatedName, updatedExpr, kind)
     }
-    val updatedSys = sortedSys.copy(signals = updatedSignals)
+    val updatedSys = sortedSys.copy(states = updatedStates, inputs = updatedInputs, signals = updatedSignals)
 
     val anno = TransitionSystemAnnotation(updatedSys)
     state.copy(circuit = circuit, annotations = state.annotations :+ anno)
@@ -109,7 +150,7 @@ object FirrtlToTransitionSystem extends Transform with DependencyAPIMigration {
 }
 
 object suffixEncoder{
-  def updateSignalExpr(expr: SMTExpr, decisionVarsMap: Map[String, String]): SMTExpr = {
+  def updateSignalExpr(expr: SMTExpr, decisionVarsMap: mutable.Map[String, String]): SMTExpr = {
     expr match {
       case bvs: BVSymbol => 
         val updatedName = decisionVarsMap.getOrElse(bvs.name, bvs.name)
@@ -125,9 +166,15 @@ object suffixEncoder{
         println(s"[ArrayFunctionCall]: ${arrfc.name} ${arrfc.args} ${arrfc.indexWidth} ${arrfc.dataWidth}")
         arrfc
       case bvUnaryExpr: BVUnaryExpr =>
+        println(s"[BVUnaryExpr]: ${bvUnaryExpr.e}")
         updateBVSignal(bvUnaryExpr, decisionVarsMap)
       case bvBinaryExpr: BVBinaryExpr =>
+        println(s"[BVBinaryExpr]: ${bvBinaryExpr.a} ${bvBinaryExpr.b}")
         updateBVSignal(bvBinaryExpr, decisionVarsMap)
+      case bvor @ BVOr(terms) =>
+        println(s"[BVOr]: ${bvor.terms}")
+        val updatedTerms = terms.map(term => updateBVSignal(term, decisionVarsMap))
+        BVOr(updatedTerms)
       case ite @ BVIte(cond, tru, fals) =>
         println(s"[BVIte]: ${ite.cond} ${ite.tru} ${ite.fals}")
         val updatedCond = updateBVSignal(cond, decisionVarsMap)
@@ -138,7 +185,7 @@ object suffixEncoder{
     }
   }
 
-  def updateBVSignal(expr: BVExpr, decisionVarsMap: Map[String, String]): BVExpr = {
+  def updateBVSignal(expr: BVExpr, decisionVarsMap: mutable.Map[String, String]): BVExpr = {
     expr match {
       case bvs: BVSymbol => 
         val updatedName = decisionVarsMap.getOrElse(bvs.name, bvs.name)
