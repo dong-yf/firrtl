@@ -150,6 +150,15 @@ object FirrtlToTransitionSystem extends Transform with DependencyAPIMigration {
 }
 
 object suffixEncoder{
+  def updateStatesAndSignals(expr: SMTExpr, decisionVarsMap: mutable.Map[String, String]): SMTExpr = {
+    expr match {
+      case sym: SMTSymbol => 
+        val updatedName = decisionVarsMap.getOrElse(sym.name, sym.name)
+        sym.rename(updatedName)
+      case other => SMTExprMap.mapExpr(other, updateStatesAndSignals(_, decisionVarsMap))
+    }
+  }
+
   def updateSignalExpr(expr: SMTExpr, decisionVarsMap: mutable.Map[String, String]): SMTExpr = {
     expr match {
       case bvs: BVSymbol => 
@@ -197,6 +206,10 @@ object suffixEncoder{
         println(s"[BVBinaryExpr]: ${bvBinaryExpr.a} ${bvBinaryExpr.b}")
         bvBinaryExpr.reapply(updateBVSignal(bvBinaryExpr.a, decisionVarsMap),
           updateBVSignal(bvBinaryExpr.b, decisionVarsMap))
+      case bvand @ BVAnd(terms) =>
+        println(s"[BVAnd]: ${bvand.terms}")
+        val updatedTerms = terms.map(term => updateBVSignal(term, decisionVarsMap))
+        BVAnd(updatedTerms)
       case _ => expr
     }
   }
