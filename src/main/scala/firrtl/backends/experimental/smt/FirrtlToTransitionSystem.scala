@@ -120,8 +120,8 @@ object FirrtlToTransitionSystem extends Transform with DependencyAPIMigration {
       case state @ State(sym, init, next) =>
         println(s"[State]: ${sym.name} ${init} ${next}")
         val newsym = sym.rename(decisionVarsMap.getOrElse(sym.name, sym.name))
-        val newinit = if (!init.isEmpty) init.map(expr => suffixEncoder.updateSignalExpr(expr, decisionVarsMap)) else None
-        val newnext = if (!next.isEmpty) next.map(expr => suffixEncoder.updateSignalExpr(expr, decisionVarsMap)) else None
+        val newinit = if (!init.isEmpty) init.map(expr => suffixEncoder.updateStatesAndSignals(expr, decisionVarsMap)) else None
+        val newnext = if (!next.isEmpty) next.map(expr => suffixEncoder.updateStatesAndSignals(expr, decisionVarsMap)) else None
         println(s"[Updated State]: ${newsym.name} ${newinit} ${newnext}")
         State(newsym, newinit, newnext)
     }
@@ -138,7 +138,7 @@ object FirrtlToTransitionSystem extends Transform with DependencyAPIMigration {
     case signal @ Signal(name, expr, kind) =>
       println(s"[Signal]: ${name} ${expr} ${kind}")
       val updatedName = decisionVarsMap.getOrElse(name, name)
-      val updatedExpr = suffixEncoder.updateSignalExpr(expr, decisionVarsMap)
+      val updatedExpr = suffixEncoder.updateStatesAndSignals(expr, decisionVarsMap)
       println(s"[Updated Signal]: ${updatedName} ${updatedExpr} ${kind}")
       Signal(updatedName, updatedExpr, kind)
     }

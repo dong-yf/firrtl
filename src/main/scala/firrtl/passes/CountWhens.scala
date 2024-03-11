@@ -42,7 +42,7 @@ object CountWhens extends Transform with DependencyAPIMigration {
   // FIXME: 
   // 1. index should be reset for each module
   // 2. index may not be unique for each condition
-  private var index = 0
+  private var index = 1
   private val conditionIndexMap = mutable.HashMap[ir.Expression, Int]()
 
   def onModule(m: DefModule, main: String): (DefModule, Seq[Annotation]) = {
