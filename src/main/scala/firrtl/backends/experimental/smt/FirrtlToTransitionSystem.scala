@@ -59,7 +59,7 @@ object FirrtlToTransitionSystem extends Transform with DependencyAPIMigration {
         val pattern = """.*?>(.*)""".r
         val matchres = pattern.findFirstMatchIn(childCondition.serialize).map(_.group(1))
         val childName = matchres.get
-        val suffix = s"${childName}_g#${cIndex}:-${cIndex}"
+        val suffix = s"${childName}_g#${cIndex}:${cIndex}"
         println(s"${suffix}")
         println(s"[NegativeEdge]: ${childCondition.serialize}")
         childName -> suffix
@@ -77,7 +77,7 @@ object FirrtlToTransitionSystem extends Transform with DependencyAPIMigration {
         val pattern = """.*?>(.*)""".r
         val matchres = pattern.findFirstMatchIn(parentCondition.serialize).map(_.group(1))
         val parentName = matchres.get
-        val suffix = s"${parentName}_g#${pIndex}:-${pIndex}"
+        val suffix = s"${parentName}_g#${pIndex}:${pIndex}"
         parentName -> suffix
     }.foreach { case (parentName, suffix) =>
       if (!decisionVarsMap.contains(parentName)) {
