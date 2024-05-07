@@ -58,17 +58,33 @@ object CountWhens extends Transform with DependencyAPIMigration {
       println(s"Conditionally: ${c.pred}")
       parent match {
         case Some((p, b)) => 
-          val parentTarget = Utils.toTarget(main, m)(p)
-          val childTarget = Utils.toTarget(main, m)(c.pred)
-          val pIndex = conditionIndexMap.getOrElse(p, -1)
-          val cIndex = index
-          val edgeAnno = if (b) PositiveEdgeAnnotation(parentTarget, childTarget, pIndex, cIndex) else NegativeEdgeAnnotation(parentTarget, childTarget, pIndex, cIndex)
-          val dontTouchParent = DontTouchAnnotation(parentTarget)
-          val dontTouchChild = DontTouchAnnotation(childTarget)
-          annos.append(edgeAnno)
-          annos.append(dontTouchParent)
-          annos.append(dontTouchChild)
+          try {
+            val parentTarget = Utils.toTarget(main, m)(p)
+            val childTarget = Utils.toTarget(main, m)(c.pred)
+            val pIndex = conditionIndexMap.getOrElse(p, -1)
+            val cIndex = index
+            val edgeAnno = if (b) PositiveEdgeAnnotation(parentTarget, childTarget, pIndex, cIndex) else NegativeEdgeAnnotation(parentTarget, childTarget, pIndex, cIndex)
+            val dontTouchParent = DontTouchAnnotation(parentTarget)
+            val dontTouchChild = DontTouchAnnotation(childTarget)
+            annos.append(edgeAnno)
+            annos.append(dontTouchParent)
+            annos.append(dontTouchChild)
+          } catch {
+            case e: Exception => println("catch exception")
+          }
         case None =>
+          try {
+            val parentTarget = Utils.toTarget(main, m)(c.pred)
+            val childTarget = Utils.toTarget(main, m)(c.pred)
+            val pIndex = index
+            val cIndex = index
+            val edgeAnno = PositiveEdgeAnnotation(parentTarget, childTarget, pIndex, cIndex)
+            val dontTouchChild = DontTouchAnnotation(childTarget)
+            annos.append(edgeAnno)
+            annos.append(dontTouchChild)
+          } catch {
+            case e: Exception => println("catch exception")
+          }
       }
       conditionIndexMap(c.pred) = index
       println(s"index: ${index}")
