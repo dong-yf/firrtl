@@ -12,18 +12,41 @@ import firrtl.transforms._
 import scala.collection.mutable
 
 
+case class EmptyAnnotation(original: String) extends NoTargetAnnotation {
+  override def serialize: String = s"EmptyAnnotation($original)"
+}
+
 case class PositiveEdgeAnnotation(parentCondition: Target, childCondition: Target, pIndex: Int, cIndex: Int)
     extends MultiTargetAnnotation {
   
   override val targets: Seq[Seq[Target]] = Seq(Seq(parentCondition), Seq(childCondition))
-  override def duplicate(n: Seq[Seq[Target]]): PositiveEdgeAnnotation = this.copy(n(0).head, n(1).head, pIndex, cIndex)
+  override def duplicate(n: Seq[Seq[Target]]): Annotation = {
+    if (n(0).isEmpty || n(1).isEmpty) {
+      EmptyAnnotation("PositiveEdgeAnnotation")
+    }
+    else if(n(0).length == 1 && n(1).length == 1) {
+      this.copy(n(0).head, n(1).head, pIndex, cIndex)
+    } else {
+      this.copy(n(0).head, n(1).head, pIndex, cIndex)
+    }
+  }
 }
 
 case class NegativeEdgeAnnotation(parentCondition: Target, childCondition: Target, pIndex: Int, cIndex: Int)
     extends MultiTargetAnnotation {
 
   override val targets: Seq[Seq[Target]] = Seq(Seq(parentCondition), Seq(childCondition))
-  override def duplicate(n: Seq[Seq[Target]]): NegativeEdgeAnnotation = this.copy(n(0).head, n(1).head, pIndex, cIndex)
+  override def duplicate(n: Seq[Seq[Target]]): Annotation = {
+    if (n(0).isEmpty || n(1).isEmpty) {
+      EmptyAnnotation("NegativeEdgeAnnotation")
+    }
+    else if(n(0).length == 1 && n(1).length == 1) {
+      this.copy(n(0).head, n(1).head, pIndex, cIndex)
+    } else {
+      this.copy(n(0).head, n(1).head, pIndex, cIndex)
+    }
+  
+  }
 }
 
 
@@ -64,11 +87,13 @@ object CountWhens extends Transform with DependencyAPIMigration {
             val pIndex = conditionIndexMap.getOrElse(p, -1)
             val cIndex = index
             val edgeAnno = if (b) PositiveEdgeAnnotation(parentTarget, childTarget, pIndex, cIndex) else NegativeEdgeAnnotation(parentTarget, childTarget, pIndex, cIndex)
-            val dontTouchParent = DontTouchAnnotation(parentTarget)
-            val dontTouchChild = DontTouchAnnotation(childTarget)
+            // val dontTouchParent = DontTouchAnnotation(parentTarget)
+            // val dontTouchChild = DontTouchAnnotation(childTarget)
+            // println(s"don't touch: ${parentTarget}")
+            // println(s"don't touch: ${childTarget}")
             annos.append(edgeAnno)
-            annos.append(dontTouchParent)
-            annos.append(dontTouchChild)
+            // annos.append(dontTouchParent)
+            // annos.append(dontTouchChild)
           } catch {
             case e: Exception => println("catch exception")
           }
@@ -79,9 +104,12 @@ object CountWhens extends Transform with DependencyAPIMigration {
             val pIndex = index
             val cIndex = index
             val edgeAnno = PositiveEdgeAnnotation(parentTarget, childTarget, pIndex, cIndex)
-            val dontTouchChild = DontTouchAnnotation(childTarget)
+            // val dontTouchChild = DontTouchAnnotation(childTarget)
+            // println(s"don't touch: ${childTarget}")
+            // println(s"conseq: " + c.conseq)
+            // println(s"alt: " + c.alt)
             annos.append(edgeAnno)
-            annos.append(dontTouchChild)
+            // annos.append(dontTouchChild)
           } catch {
             case e: Exception => println("catch exception")
           }
@@ -101,6 +129,11 @@ object CountWhens extends Transform with DependencyAPIMigration {
     
     val modsAndAnnos = circuit.modules.map(onModule(_, circuit.main))
     val newAnnos = modsAndAnnos.flatMap(_._2)
+    // println("state annotations: ")
+    println("new annotations: ")
+    println(newAnnos)
+    println("countwhens circuit: ")
+    println(circuit.serialize)
   
     state.copy(annotations = newAnnos ++: state.annotations)
   }

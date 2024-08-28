@@ -36,7 +36,7 @@ object FirrtlToTransitionSystem extends Transform with DependencyAPIMigration {
   override def optionalPrerequisites: Seq[TransformDependency] = Seq(Dependency[firrtl.passes.InlineInstances])
 
   override protected def execute(state: CircuitState): CircuitState = {
-    println("-------enter execute---------")
+    // println("-------enter execute---------")
     val circuit = state.circuit
     val presetRegs = state.annotations.collect {
       case PresetRegAnnotation(target) if target.module == circuit.main => target.ref
@@ -51,8 +51,8 @@ object FirrtlToTransitionSystem extends Transform with DependencyAPIMigration {
         val matchres = pattern.findFirstMatchIn(childCondition.serialize).map(_.group(1))
         val childName = matchres.get
         val suffix = s"${childName}_g#${cIndex}:${cIndex}"
-        println(s"${suffix}")
-        println(s"[PositiveEdge]: ${childCondition.serialize}")
+        // println(s"${suffix}")
+        // println(s"[PositiveEdge]: ${childCondition.serialize}")
         childName -> suffix
         decisionVarsMap += (childName -> suffix)
       case NegativeEdgeAnnotation(parentCondition, childCondition, pIndex, cIndex) => 
@@ -60,8 +60,8 @@ object FirrtlToTransitionSystem extends Transform with DependencyAPIMigration {
         val matchres = pattern.findFirstMatchIn(childCondition.serialize).map(_.group(1))
         val childName = matchres.get
         val suffix = s"${childName}_g#${cIndex}:${cIndex}"
-        println(s"${suffix}")
-        println(s"[NegativeEdge]: ${childCondition.serialize}")
+        // println(s"${suffix}")
+        // println(s"[NegativeEdge]: ${childCondition.serialize}")
         childName -> suffix
         decisionVarsMap += (childName -> suffix)
     }
@@ -81,7 +81,7 @@ object FirrtlToTransitionSystem extends Transform with DependencyAPIMigration {
         parentName -> suffix
     }.foreach { case (parentName, suffix) =>
       if (!decisionVarsMap.contains(parentName)) {
-        println(s"[DecisionVarsMap]: ${parentName} ${suffix}")
+        // println(s"[DecisionVarsMap]: ${parentName} ${suffix}")
         decisionVarsMap += (parentName -> suffix)
       }
     }
@@ -118,28 +118,28 @@ object FirrtlToTransitionSystem extends Transform with DependencyAPIMigration {
     // update state and signal names
     val updatedStates = sortedSys.states.map {
       case state @ State(sym, init, next) =>
-        println(s"[State]: ${sym.name} ${init} ${next}")
+        // println(s"[State]: ${sym.name} ${init} ${next}")
         val newsym = sym.rename(decisionVarsMap.getOrElse(sym.name, sym.name))
         val newinit = if (!init.isEmpty) init.map(expr => suffixEncoder.updateStatesAndSignals(expr, decisionVarsMap)) else None
         val newnext = if (!next.isEmpty) next.map(expr => suffixEncoder.updateStatesAndSignals(expr, decisionVarsMap)) else None
-        println(s"[Updated State]: ${newsym.name} ${newinit} ${newnext}")
+        // println(s"[Updated State]: ${newsym.name} ${newinit} ${newnext}")
         State(newsym, newinit, newnext)
     }
 
     val updatedInputs = sortedSys.inputs.map {
       case input @ BVSymbol(name, width) =>
         val updatedName = decisionVarsMap.getOrElse(name, name)
-        println(s"[Input]: ${name} ${width}")
-        println(s"[Updated Input]: ${updatedName} ${width}")
+        // println(s"[Input]: ${name} ${width}")
+        // println(s"[Updated Input]: ${updatedName} ${width}")
         BVSymbol(updatedName, width)
     }
 
     val updatedSignals = sortedSys.signals.map {
     case signal @ Signal(name, expr, kind) =>
-      println(s"[Signal]: ${name} ${expr} ${kind}")
+      // println(s"[Signal]: ${name} ${expr} ${kind}")
       val updatedName = decisionVarsMap.getOrElse(name, name)
       val updatedExpr = suffixEncoder.updateStatesAndSignals(expr, decisionVarsMap)
-      println(s"[Updated Signal]: ${updatedName} ${updatedExpr} ${kind}")
+      // println(s"[Updated Signal]: ${updatedName} ${updatedExpr} ${kind}")
       Signal(updatedName, updatedExpr, kind)
     }
     val updatedSys = sortedSys.copy(states = updatedStates, inputs = updatedInputs, signals = updatedSignals)
