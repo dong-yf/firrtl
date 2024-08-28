@@ -162,10 +162,6 @@ class DeadCodeElimination extends Transform with RegisteredTransform with Depend
         for (expr <- Seq(s.clk, s.pred, s.en)) {
           // __DYF_ADD_BEGIN__
           getDeps(expr).foreach(ref => assertVars += ref)
-          // println("s.pred:")
-          // println(s.pred.serialize)
-          // println("s.en:")  
-          // println(s.en.serialize)
           // __DYF_ADD_END__
           getDeps(expr).foreach(ref => depGraph.addPairWithEdge(circuitSink, ref))
         }
@@ -215,10 +211,6 @@ class DeadCodeElimination extends Transform with RegisteredTransform with Depend
     val topOutputs = topModule.ports.foreach { port =>
       depGraph.addPairWithEdge(circuitSink, LogicNode(c.main, port.name))
     }
-    //  __DYF_ADD_BEGIN__
-    // println("depGraph:")
-    // print(depGraph.linearize)
-    // __DYF_ADD_END__
     depGraph
   }
 
@@ -280,7 +272,6 @@ class DeadCodeElimination extends Transform with RegisteredTransform with Depend
           val node = LogicNode(mod.name, decl.name)
           if (deadNodes.contains(node)) {
             logger.debug(deleteMsg(decl))
-            // println(deleteMsg(decl))
             renames.delete(decl.name)
             EmptyStmt
           } else decl
@@ -330,24 +321,6 @@ class DeadCodeElimination extends Transform with RegisteredTransform with Depend
     }
 
   }
-
-  // __DYF_ADD_BEGIN__
-  // def extractAssertAssumeVars(expr: Expression): Set[LogicNode] = {
-  //   val vars = mutable.Set.empty[LogicNode]
-  //   def rec(e: Expression): Unit = {
-  //     e match {
-  //       case ref @ (_: WRef | _: WSubField) =>
-  //         vars += LogicNode(ref)
-  //       case nested @ (_: Mux | _: DoPrim | _: ValidIf) =>
-  //         nested.map(rec)
-  //       case ignore @ (_: Literal) => // Do nothing
-  //       case unexpected => throwInternalError()
-  //     }
-  //   }
-  //   rec(expr)
-  //   vars.toSet
-  // }
-  // __DYF_ADD_END__
 
   def run(state: CircuitState, dontTouches: Seq[LogicNode], doTouchExtMods: Set[String]): CircuitState = {
     val c = state.circuit
