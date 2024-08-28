@@ -277,7 +277,10 @@ trait Transform extends TransformLike[CircuitState] with DependencyAPI[Transform
     */
   protected def execute(state: CircuitState): CircuitState
 
-  def transform(state: CircuitState): CircuitState = execute(state)
+  def transform(state: CircuitState): CircuitState = {
+    // println(s"Running transform: $name")
+    execute(state)
+  }
 
   import firrtl.CircuitForm.{ChirrtlForm => C, HighForm => H, MidForm => M, LowForm => L, UnknownForm => U}
 

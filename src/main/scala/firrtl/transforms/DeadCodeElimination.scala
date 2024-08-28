@@ -110,7 +110,8 @@ class DeadCodeElimination extends Transform with RegisteredTransform with Depend
   /** Construct the dependency graph within this module */
   private def setupDepGraph(
     depGraph: MutableDiGraph[LogicNode],
-    instMap:  collection.Map[String, String]
+    instMap:  collection.Map[String, String],
+    assertVars: mutable.Set[LogicNode]
   )(mod:      Module
   ): Unit = {
     def getDeps(expr: Expression): Seq[LogicNode] = getDepsImpl(mod.name, instMap)(expr)
@@ -159,6 +160,13 @@ class DeadCodeElimination extends Transform with RegisteredTransform with Depend
         (args :+ clk :+ en).flatMap(getDeps(_)).foreach(ref => depGraph.addPairWithEdge(circuitSink, ref))
       case s: Verification =>
         for (expr <- Seq(s.clk, s.pred, s.en)) {
+          // __DYF_ADD_BEGIN__
+          getDeps(expr).foreach(ref => assertVars += ref)
+          // println("s.pred:")
+          // println(s.pred.serialize)
+          // println("s.en:")  
+          // println(s.en.serialize)
+          // __DYF_ADD_END__
           getDeps(expr).foreach(ref => depGraph.addPairWithEdge(circuitSink, ref))
         }
       case Block(stmts) => stmts.foreach(onStmt(_))
@@ -178,11 +186,12 @@ class DeadCodeElimination extends Transform with RegisteredTransform with Depend
   private def createDependencyGraph(
     instMaps:       collection.Map[String, collection.Map[String, String]],
     doTouchExtMods: Set[String],
+    assertVars:     mutable.Set[LogicNode],
     c:              Circuit
   ): MutableDiGraph[LogicNode] = {
     val depGraph = new MutableDiGraph[LogicNode]
     c.modules.foreach {
-      case mod: Module    => setupDepGraph(depGraph, instMaps(mod.name))(mod)
+      case mod: Module    => setupDepGraph(depGraph, instMaps(mod.name), assertVars)(mod)
       case ext: ExtModule =>
         // Connect all inputs to all outputs
         val node = LogicNode(ext)
@@ -206,7 +215,10 @@ class DeadCodeElimination extends Transform with RegisteredTransform with Depend
     val topOutputs = topModule.ports.foreach { port =>
       depGraph.addPairWithEdge(circuitSink, LogicNode(c.main, port.name))
     }
-
+    //  __DYF_ADD_BEGIN__
+    // println("depGraph:")
+    // print(depGraph.linearize)
+    // __DYF_ADD_END__
     depGraph
   }
 
@@ -255,6 +267,7 @@ class DeadCodeElimination extends Transform with RegisteredTransform with Depend
             case Some(instMod) => inst.copy(tpe = Utils.module_type(instMod))
             case None =>
               logger.debug(deleteMsg(inst))
+              // println(deleteMsg(inst))
               renames.delete(inst.name)
               EmptyStmt
           }
@@ -267,6 +280,7 @@ class DeadCodeElimination extends Transform with RegisteredTransform with Depend
           val node = LogicNode(mod.name, decl.name)
           if (deadNodes.contains(node)) {
             logger.debug(deleteMsg(decl))
+            // println(deleteMsg(decl))
             renames.delete(decl.name)
             EmptyStmt
           } else decl
@@ -317,6 +331,24 @@ class DeadCodeElimination extends Transform with RegisteredTransform with Depend
 
   }
 
+  // __DYF_ADD_BEGIN__
+  // def extractAssertAssumeVars(expr: Expression): Set[LogicNode] = {
+  //   val vars = mutable.Set.empty[LogicNode]
+  //   def rec(e: Expression): Unit = {
+  //     e match {
+  //       case ref @ (_: WRef | _: WSubField) =>
+  //         vars += LogicNode(ref)
+  //       case nested @ (_: Mux | _: DoPrim | _: ValidIf) =>
+  //         nested.map(rec)
+  //       case ignore @ (_: Literal) => // Do nothing
+  //       case unexpected => throwInternalError()
+  //     }
+  //   }
+  //   rec(expr)
+  //   vars.toSet
+  // }
+  // __DYF_ADD_END__
+
   def run(state: CircuitState, dontTouches: Seq[LogicNode], doTouchExtMods: Set[String]): CircuitState = {
     val c = state.circuit
     val moduleMap = c.modules.map(m => m.name -> m).toMap
@@ -327,8 +359,11 @@ class DeadCodeElimination extends Transform with RegisteredTransform with Depend
     })
     val topoSortedModules = iGraph.graph.transformNodes(_.module).linearize.reverse.map(moduleMap(_))
 
+    // __DYF_ADD_BEGIN__
+    val assertAssumeVars = mutable.Set.empty[LogicNode]
+    // __DYF_ADD_END__
     val depGraph = {
-      val dGraph = createDependencyGraph(moduleDeps, doTouchExtMods, c)
+      val dGraph = createDependencyGraph(moduleDeps, doTouchExtMods, assertAssumeVars, c)
 
       val vertices = dGraph.getVertices
       dontTouches.foreach { dontTouch =>
@@ -341,11 +376,51 @@ class DeadCodeElimination extends Transform with RegisteredTransform with Depend
         }
       }
 
-      // Check for dont touches that are not found
       DiGraph(dGraph)
     }
+    
+    // __DYF_Modify__
+    val useOriginalImplementation = true
 
-    val liveNodes = depGraph.reachableFrom(circuitSink) + circuitSink
+    val liveNodes = {
+      if (useOriginalImplementation) {
+        // Original implementation
+        // println("original DCE")
+        // depGraph.reachableFrom(circuitSink) + circuitSink
+
+        println("original slice")
+        assertAssumeVars.flatMap(depGraph.reachableFrom) ++ assertAssumeVars + circuitSink
+      }
+      else {
+        // Modified implementation
+        println("Modified slice")
+        val originaliveNodes = depGraph.reachableFrom(circuitSink) + circuitSink
+        // depGraph.getEdgeMap.map({case (x, y) => y.map(z => (x.e1.serialize, z.e1.serialize))}).flatten.foreach(println)
+        val reverseDepGraph = depGraph.reverse
+    
+        val assertAndDeps = assertAssumeVars.flatMap(depGraph.reachableFrom) ++ assertAssumeVars
+        val forwardDeps = assertAndDeps.flatMap(reverseDepGraph.getEdges)
+      
+        // val forwardDeps = assertAssumeVars.flatMap(reverseDepGraph.getEdges)
+        println("forwardDeps:")
+        println(forwardDeps.map(_.e1.serialize))
+        // val extraLiveNodes = assertForwardOne & originaliveNodes
+        val extraLiveNodes = forwardDeps.filter { node =>
+          println("node:")
+          println(node.e1.serialize)
+          val predecessors = depGraph.getEdges(node)
+          println("predecessors:")
+          println(predecessors.map(_.e1.serialize))
+          // predecessors.subsetOf(assertAssumeVars)
+          predecessors.subsetOf(assertAndDeps)  // !!!!!!!!!!!!!!!!!!!!
+        } 
+        // & originaliveNodes
+        println("assertAssumeVars:")
+        println(assertAssumeVars.map(_.e1.serialize))
+        assertAssumeVars.flatMap(depGraph.reachableFrom) ++ extraLiveNodes ++ assertAssumeVars + circuitSink 
+      }
+    }
+    println(liveNodes.map(_.e1.serialize))
     val deadNodes = depGraph.getVertices -- liveNodes
     val renames = MutableRenameMap()
     renames.setCircuit(c.main)
@@ -364,7 +439,8 @@ class DeadCodeElimination extends Transform with RegisteredTransform with Depend
 
     // Preserve original module order
     val newCircuit = c.copy(modules = c.modules.flatMap(m => modulesxMap.get(m.name)))
-
+    println("after DCE: ")
+    println(newCircuit.serialize)
     state.copy(circuit = newCircuit, renames = Some(renames))
   }
 
@@ -385,6 +461,8 @@ class DeadCodeElimination extends Transform with RegisteredTransform with Depend
       logger.info("Skipping DCE")
       state
     } else {
+      println("DCE state:")
+      println(state.circuit.serialize)
       run(state, dontTouches, doTouchExtMods.toSet)
     }
   }
